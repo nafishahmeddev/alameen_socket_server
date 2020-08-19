@@ -1,0 +1,299 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+let app = require('../app');
+let debug = require('debug')('untitled:server');
+let http = require('http');
+let socket = require('socket.io');
+let fs = require("fs");
+let mysql      = require('mysql');
+/**
+ * Console Colors
+ */
+const ConsoleColor = {
+  Reset : "\x1b[0m",
+  Bright : "\x1b[1m",
+  Dim : "\x1b[2m",
+  Underscore : "\x1b[4m",
+  Blink : "\x1b[5m",
+  Reverse : "\x1b[7m",
+  Hidden : "\x1b[8m",
+
+  FgBlack : "\x1b[30m",
+  FgRed : "\x1b[31m",
+  FgGreen : "\x1b[32m",
+  FgYellow : "\x1b[33m",
+  FgBlue : "\x1b[34m",
+  FgMagenta : "\x1b[35m",
+  FgCyan : "\x1b[36m",
+  FgWhite : "\x1b[37m",
+
+  BgBlack : "\x1b[40m",
+  BgRed : "\x1b[41m",
+  BgGreen : "\x1b[42m",
+  BgYellow : "\x1b[43m",
+  BgBlue : "\x1b[44m",
+  BgMagenta : "\x1b[45m",
+  BgCyan : "\x1b[46m",
+  BgWhite : "\x1b[47m"
+}
+/**
+ * mysql
+ */
+let dbConfig= {
+  host     : 'localhost',
+  user     : 'ahmed',
+  password : '8080',
+  database : 'alameenschool'
+};
+
+function handleDisconnect() {
+  console.log(ConsoleColor.FgBlue, "Connecting to database");
+  global._mysql = mysql.createConnection(dbConfig);  // Recreate the connection, since the old one cannot be reused.
+  global._mysql.connect( function onConnect(err) {   // The server is either down
+    if (err) {                                  // or restarting (takes a while sometimes).
+      console.log('error when connecting to db:', err);
+      setTimeout(handleDisconnect, 10000);    // We introduce a delay before attempting to reconnect,
+    } else {
+      console.log(ConsoleColor.FgBlue, "Connected to database\n\n");
+      console.log(ConsoleColor.FgBlack);
+    }                                          // to avoid a hot loop, and to allow our node script to
+  });                                             // process asynchronous requests in the meantime.// If you're also serving http, display a 503 error.
+  global._mysql.on('error', function onError(err) {
+
+    if (err.code === 'PROTOCOL_CONNECTION_LOST') {   // Connection to the MySQL server is usually
+      console.log(ConsoleColor.FgBlue, "Reconnecting to database");
+      handleDisconnect();                         // lost due to either server restart, or a
+    } else {                                        // connnection idle timeout (the wait_timeout
+      //console.log('db error', err);
+      console.log(ConsoleColor.FgRed);
+      throw err;                                  // server variable configures this)
+    }
+  });
+}
+handleDisconnect();
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+let port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+let server = http.createServer(app);
+
+/**
+ * Socket io
+ */
+let io = socket(server, {
+  path: '/io'
+});
+/**
+ * Queue system
+ */
+let connection_counter=0;
+const { Queue } = require("dynamic-queue");
+let queue = new Queue();
+queue.catch((err) => {
+  console.log(err.stack);
+  queue.resume();
+});
+io.on("connection", socket=>{
+  ///
+  queue.push(async () => {
+    connection_counter++;
+    console.log("User Connected");
+    console.log("Connection Count = "+connection_counter+"\n\n");
+  });
+  queue.resume();
+  ///
+  socket.on("answer_by_student", (req) =>{
+    queue.push(async () => {
+      await saveAnswer(req, socket.id);
+    });
+    queue.resume();
+
+
+  })
+
+  socket.on("disconnect", ()=>{
+    queue.push(async () => {
+      connection_counter--;
+      console.log("User Disconnected");
+      console.log("Connection Count = "+connection_counter+"\n\n");
+    });
+    queue.resume();
+  })
+})
+let counter=0;
+function saveAnswer(req, sock){
+  if(req.dataType==="text"){
+    saveAnswerToDatabase(req, sock);
+  }
+  else if(req.dataType==="file")
+  {
+    console.log(ConsoleColor.FgGreen,req.answer.file_name,"");
+    console.log(ConsoleColor.FgBlack,"• Uploading file.");
+    let timestamp = new Date().getTime();
+    let save_name = timestamp+"_"+req.answer.file_name;
+    fs.writeFile("uploads/"+save_name, req.answer.file_binary,  "binary",function(err) {
+      if(err){
+        console.error(err);
+      } else {
+        console.log(ConsoleColor.FgBlack,"• Saved to folder ");
+        global._mysql.query('SELECT 1 + 1 AS solution', function (error, results, fields) {
+          if (error) {
+            console.error(error);
+          } else {
+            counter++;
+            console.log(ConsoleColor.FgBlack,"• Saved to database "+counter+"\n\n");
+            io.to(sock).emit("answer_uploaded", "cool")
+          }
+        });
+      }
+    });
+  }
+
+}
+function saveAnswerToDatabase(req, sock){
+  let $studentId=req.studentId;
+  let $questionId=req.questionId;
+  let $examdetailsId=req.examdetailsId;
+  let $examId = req.examId;
+  let $answer = req.answer;
+  let $addedBy = 0;
+
+
+  let $duplicate_query=`SELECT questionanswaredId  FROM questionanswared WHERE questionId='${$questionId}'  AND examdetailsId='${$examdetailsId}'  AND  studentId='${$studentId} LIMIT 0,1'`;
+  global._mysql.query($duplicate_query, function (error, results, fields){
+    if(error){
+      console.log(error);
+      return;
+    }
+
+    //save query
+    let $save_query;
+    if(results.length>0){
+      let questionanswaredId = results[0].questionanswaredId;
+      //delete query
+      if($answer===""){
+        //delete query
+        let $delete_query = `DELETE FROM questionanswared WHERE questionanswaredId='${questionanswaredId}'`;
+        global._mysql.query($delete_query, (err,res,fl)=>{
+          if(!err){
+            console.log("Successfully deleted");
+          } else {
+            io.to(sock).emit("error_message", "answer not deleted");
+            console.error(err);
+          }
+        });
+        return;
+      }
+      //add to database
+      $save_query = `UPDATE questionanswared SET studentId='${$studentId}',examId='${$examId}',examdetailsId='${$examdetailsId}',questionId='${$questionId}',answerSelected='${$answer}', addedBy='0', modifyBy='0', addedDate=NOW(), modifyDate=NOW() WHERE questionanswaredId='${questionanswaredId}'`;
+    } else {
+      $save_query = `INSERT INTO questionanswared SET studentId='${$studentId}', examId='${$examId}',examdetailsId='${$examdetailsId}',questionId='${$questionId}',answerSelected='${$answer}', addedBy='0', modifyBy='0', addedDate=NOW(), modifyDate=NOW()`;
+    }
+    //
+    global._mysql.query($save_query, (e,r,f)=>{
+      if(e){
+        console.log(e);
+        io.to(sock).emit("error_message", "answer not updated")
+        return ;
+      }
+      console.log("successfully updated answer");
+
+    });
+  });
+
+
+
+
+  /*
+  global._mysql.query('SELECT 1 + 1 AS solution', function (error, results, fields) {
+    if (error) {
+      console.error(error);
+    } else {
+      counter++;
+      console.log(ConsoleColor.FgBlack,"• Saved to database "+counter+"\n\n");
+      io.to(sock).emit("answer_uploaded", "cool")
+    }
+  });
+   */
+
+}
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  let port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    global._mysql.end();
+    throw error;
+  }
+
+  let bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  let addr = server.address();
+  let bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
