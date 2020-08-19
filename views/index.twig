@@ -84,30 +84,12 @@
 
 
   <script>
-    let last_count = 0;
-    let sockets = [];
 
-    function conn() {
-      sockets[last_count] = io({
-        path: "/io",
-        port: 3000
-      });
-      sockets[last_count].on("connect", function (con){
-        console.log("connected");
-        if(last_count<2000) {
-          conn();
-        }
-      })
-      last_count++;
-    }
-    conn();
+    let socket = io({
+      path: "/io",
+      port: 3000
+    });
 
-
-
-
-
-
-    /*
     socket.on("answer_uploaded",(data)=>{
       console.log(data);
     })
@@ -199,8 +181,5 @@
 
     stillTimeRest();
     //stopwatch('', '');
-
-
-    */
   </script>
 {% endblock %}

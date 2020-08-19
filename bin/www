@@ -180,37 +180,39 @@ function saveAnswerToDatabase(req, sock){
 
     //save query
     let $save_query;
+    let questionanswaredId = 0;
     if(results.length>0){
-      let questionanswaredId = results[0].questionanswaredId;
-      //delete query
-      if($answer===""){
-        //delete query
-        let $delete_query = `DELETE FROM questionanswared WHERE questionanswaredId='${questionanswaredId}'`;
-        global._mysql.query($delete_query, (err,res,fl)=>{
-          if(!err){
-            console.log("Successfully deleted");
-          } else {
-            io.to(sock).emit("error_message", "answer not deleted");
-            console.error(err);
-          }
-        });
-        return;
-      }
+      questionanswaredId = results[0].questionanswaredId;
       //add to database
       $save_query = `UPDATE questionanswared SET studentId='${$studentId}',examId='${$examId}',examdetailsId='${$examdetailsId}',questionId='${$questionId}',answerSelected='${$answer}', addedBy='0', modifyBy='0', addedDate=NOW(), modifyDate=NOW() WHERE questionanswaredId='${questionanswaredId}'`;
     } else {
       $save_query = `INSERT INTO questionanswared SET studentId='${$studentId}', examId='${$examId}',examdetailsId='${$examdetailsId}',questionId='${$questionId}',answerSelected='${$answer}', addedBy='0', modifyBy='0', addedDate=NOW(), modifyDate=NOW()`;
     }
-    //
-    global._mysql.query($save_query, (e,r,f)=>{
-      if(e){
-        console.log(e);
-        io.to(sock).emit("error_message", "answer not updated")
-        return ;
-      }
-      console.log("successfully updated answer");
+    //delete query
+    if($answer===""){
+      //delete query
+      let $delete_query = `DELETE FROM questionanswared WHERE questionanswaredId='${questionanswaredId}'`;
+      global._mysql.query($delete_query, (err,res,fl)=>{
+        if(!err){
+          console.log("Successfully deleted");
+        } else {
+          io.to(sock).emit("error_message", "answer not deleted");
+          console.error(err);
+        }
+      });
+    } else {
+      //save query
+      global._mysql.query($save_query, (e,r,f)=>{
+        if(e){
+          console.log(e);
+          io.to(sock).emit("error_message", "answer not updated")
+          return ;
+        }
+        console.log("successfully updated answer");
 
-    });
+      });
+    }
+
   });
 
 
